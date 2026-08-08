@@ -8,7 +8,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-SCOPES = ['https://www.googleapis.com/auth/blogger']
+SCOPES = ['[https://www.googleapis.com/auth/blogger](https://www.googleapis.com/auth/blogger)']
 
 # ============================================================
 # [블로그 포스팅 맞춤 설정]
@@ -93,7 +93,7 @@ def generate_blog_post_with_gemini():
 }}
 """
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={clean_api_key}"
+    url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=){clean_api_key}"
     headers = {"Content-Type": "application/json"}
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
