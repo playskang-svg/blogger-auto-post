@@ -66,7 +66,7 @@ def generate_blog_post_with_gemini():
 """
 
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-2.0-flash',
         contents=prompt
     )
 
@@ -113,7 +113,7 @@ def publish_post(blog_id, title, content, labels=None):
 if __name__ == '__main__':
     blog_id = os.environ.get('BLOG_ID', '1709348241841827034')
 
-    print("Gemini AI를 통한 블로그 포스팅 생성 중...")
+    print("Gemini AI를 통한 블로그 포스팅 내용 생성 중...")
     post_data = generate_blog_post_with_gemini()
 
     publish_post(blog_id, post_data.get('title'), post_data.get('content'), post_data.get('labels'))
