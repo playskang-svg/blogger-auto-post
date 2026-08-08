@@ -67,18 +67,15 @@ def get_blogger_service():
         st.error(f"Blogger 인증 오류: {e}")
         return None
 
-# --- Gemini API 콘텐츠 생성 ---
+# --- Gemini API 콘텐츠 생성 (429 에러 방어 로직 추가) ---
 def generate_blog_post(topic, keywords, tone, structure, ad_code=""):
     if not GEMINI_API_KEY:
         return None, "GEMINI_API_KEY가 설정되지 않았습니다."
 
     clean_key = GEMINI_API_KEY.strip().strip("'").strip('"')
-    
-    # [수정] 모델 버전을 gemini-2.0-flash 로 수정 완료
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={clean_key}"
     headers = {"Content-Type": "application/json"}
     
-    # [수정] 프롬프트 문법 오류(SyntaxError) 해결 완료
     prompt = f"""너는 전문 블로그 콘텐츠 에디터야. 구글 블로그스팟에 포스팅할 높은 품질의 SEO 최적화 글을 작성해줘.
 
 [작성 조건]
@@ -100,26 +97,44 @@ def generate_blog_post(topic, keywords, tone, structure, ad_code=""):
         }]
     }
 
-    try:
-        response = requests.post(url, headers=headers, json=data)
-        response.raise_for_status()
-        result = response.json()
-        generated_text = result['candidates'][0]['content']['parts'][0]['text']
-        
-        # 만약 마크다운 HTML 코드블럭(```html ... ```)으로 감싸져 있다면 제거
-        if generated_text.startswith("```"):
-            lines = generated_text.splitlines()
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            generated_text = "\n".join(lines).strip()
+    # 429 에러 발생 시 최대 3번까지 대기 후 재시도
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(url, headers=headers, json=data, timeout=30)
             
-        return generated_text, None
-    except requests.exceptions.HTTPError as err:
-        return None, f"API 호출 중 HTTP 에러 발생: {err}"
-    except Exception as e:
-        return None, f"API 호출 중 알 수 없는 오류 발생: {e}"
+            # 429 에러(Too Many Requests)인 경우 대기 후 재시도
+            if response.status_code == 429:
+                wait_time = 7 * (attempt + 1)  # 7초, 14초 대기
+                if attempt < max_retries - 1:
+                    st.warning(f"⚠️ API 요청 한도 초과(429). {wait_time}초 후 다시 시도합니다... ({attempt+1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    return None, "API 요청 한도 초과(429)로 재시도에 실패했습니다. 1~2분 후 다시 시도해 주세요."
+                    
+            response.raise_for_status()
+            
+            result = response.json()
+            generated_text = result['candidates'][0]['content']['parts'][0]['text']
+            
+            # 마크다운 코드블럭 제거
+            if generated_text.startswith("```"):
+                lines = generated_text.splitlines()
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                generated_text = "\n".join(lines).strip()
+                
+            return generated_text, None
+                
+        except requests.exceptions.RequestException as err:
+            return None, f"API 호출 중 에러 발생: {err}"
+        except Exception as e:
+            return None, f"알 수 없는 오류 발생: {e}"
+            
+    return None, "알 수 없는 이유로 API 호출에 실패했습니다."
 
 # --- UI 및 실행 로직 ---
 st.subheader("📝 포스팅 작성 설정")
