@@ -94,42 +94,54 @@ def generate_blog_post(topic, keywords, tone, structure):
 }}
 """
 
+    clean_api_key = GEMINI_API_KEY.strip().strip("'").strip('"')
+
     models_to_try = ['gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-pro', 'gemini-2.0-flash']
+    
+    # AQ... 신형 키 지원 다중 인증 방식 (URL / Bearer Token / API Key Header)
+    auth_strategies = [
+        lambda m, k: (f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={k}", {"Content-Type": "application/json"}),
+        lambda m, k: (f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent", {"Content-Type": "application/json", "Authorization": f"Bearer {k}"}),
+        lambda m, k: (f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent", {"Content-Type": "application/json", "x-goog-api-key": k}),
+    ]
+
     response_text = None
     errors_log = []
 
-    clean_api_key = GEMINI_API_KEY.strip().strip("'").strip('"')
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json"
+        }
+    }
 
     for model_name in models_to_try:
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={clean_api_key}"
-            headers = {"Content-Type": "application/json"}
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "responseMimeType": "application/json"
-                }
-            }
-            res = requests.post(url, headers=headers, json=payload, timeout=30)
-            res_json = res.json()
+        if response_text:
+            break
+        for idx, get_req_info in enumerate(auth_strategies):
+            try:
+                url, headers = get_req_info(model_name, clean_api_key)
+                res = requests.post(url, headers=headers, json=payload, timeout=30)
+                res_json = res.json()
 
-            if res.status_code == 200:
-                candidates = res_json.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts:
-                        response_text = parts[0].get("text", "").strip()
-                        break
-            else:
-                err_info = res_json.get("error", {}).get("message", res.text)
-                errors_log.append(f"[{model_name}] HTTP {res.status_code}: {err_info}")
-        except Exception as e:
-            errors_log.append(f"[{model_name}] {e}")
-            time.sleep(1)
+                if res.status_code == 200:
+                    candidates = res_json.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts:
+                            response_text = parts[0].get("text", "").strip()
+                            st.write(f"✓ Gemini API 접속 성공 (인증 방식 {idx+1}, 모델: {model_name})")
+                            break
+                else:
+                    err_info = res_json.get("error", {}).get("message", res.text)
+                    errors_log.append(f"[{model_name}-방식{idx+1}] HTTP {res.status_code}: {err_info}")
+            except Exception as e:
+                errors_log.append(f"[{model_name}-방식{idx+1}] {e}")
+                time.sleep(1)
 
     if not response_text:
         error_detail = "\n".join(errors_log)
-        return None, f"모든 Gemini 모델 호출 실패.\n상세 오류 로그:\n{error_detail}"
+        return None, f"모든 인증 방식 및 Gemini 모델 호출 실패.\n상세 로그:\n{error_detail}"
 
     try:
         if response_text.startswith("```"):
