@@ -34,7 +34,6 @@ CLIENT_SECRET_JSON_STR = get_config_val("BLOGGER_CLIENT_SECRET_JSON")
 TOKEN_JSON_STR = get_config_val("BLOGGER_TOKEN_JSON")
 GEMINI_API_KEY = get_config_val("GEMINI_API_KEY")
 
-# 설정 상태
 with st.expander("🔍 설정 상태 점검"):
     st.write(f"- BLOG_ID: {'✅ 설정됨' if BLOG_ID else '❌ 미설정'}")
     st.write(f"- CLIENT_SECRET: {'✅ 설정됨' if CLIENT_SECRET_JSON_STR else '❌ 미설정'}")
@@ -74,47 +73,4 @@ def generate_blog_post(topic, keywords, tone, structure):
     headers = {"Content-Type": "application/json"}
     
     prompt = f"""
-너는 전문 블로그 콘텐츠 에디터야. 구글 블로그스팟에 포스팅할 높은 품질의 SEO 최적화 글을 작성해줘.
-
-1. 주제: {topic}
-2. 필수 포함 키워드: {keywords}
-3. 말투: {tone}
-4. 구조:
-{structure}
-
-반드시 순수한 JSON 형식으로만 응답해줘.
-{{
-  "title": "글 제목",
-  "content": "<p>HTML 본문 내용...</p>",
-  "labels": ["태그1", "태그2"]
-}}
-"""
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"responseMimeType": "application/json"}
-    }
-
-    last_err = ""
-    for attempt in range(3):
-        try:
-            res = requests.post(url, headers=headers, json=payload, timeout=30)
-            res_json = res.json()
-
-            if res.status_code == 200:
-                candidates = res_json.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts:
-                        text = parts[0].get("text", "").strip()
-                        if text.startswith("```"):
-                            lines = text.splitlines()
-                            if lines[0].startswith("```"):
-                                lines = lines[1:]
-                            if lines and lines[-1].startswith("```"):
-                                lines = lines[:-1]
-                            text = "\n".join(lines).strip()
-                        return json.loads(text), None
-            elif res.status_code == 429:
-                last_err = f"429 요청 한도 대기 중 (7초 후 재시도... {attempt+1}/3)"
-                time.sleep(7)
-            else:
+너는 전문 블로그 콘텐츠 에디터야. 구글 블로그스팟에 포스팅할 높은 품질의 SEO 최적화 글을
