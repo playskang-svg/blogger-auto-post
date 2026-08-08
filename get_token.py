@@ -1,20 +1,141 @@
 import os
-from google_auth_oauthlib.flow import InstalledAppFlow
+import sys
+import json
+import time
+from datetime import datetime
+from google import genai
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
 
 SCOPES = ['https://www.googleapis.com/auth/blogger']
 
-def main():
-    if not os.path.exists('client_secret.json'):
-        print("오류: client_secret.json 파일이 필요합니다.")
-        return
+def get_credentials():
+    token_json_str = os.environ.get('BLOGGER_TOKEN_JSON')
+    client_secret_json_str = os.environ.get('BLOGGER_CLIENT_SECRET_JSON')
 
-    flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
-    creds = flow.run_local_server(port=0)
+    if not token_json_str:
+        print("오류: BLOGGER_TOKEN_JSON 환경변수가 설정되지 않았습니다.")
+        sys.exit(1)
 
-    with open('token.json', 'w', encoding='utf-8') as f:
-        f.write(creds.to_json())
+    token_info = json.loads(token_json_str)
+    creds = Credentials.from_authorized_user_info(token_info, SCOPES)
 
-    print("[성공] token.json이 생성되었습니다!")
+    if creds and creds.expired and creds.refresh_token:
+        if client_secret_json_str:
+            client_info = json.loads(client_secret_json_str)
+            installed_or_web = client_info.get('installed') or client_info.get('web')
+            if installed_or_web:
+                creds.client_id = installed_or_web.get('client_id')
+                creds.client_secret = installed_or_web.get('client_secret')
+                creds.token_uri = installed_or_web.get('token_uri', 'https://oauth2.googleapis.com/token')
+
+        creds.refresh(Request())
+
+    return creds
+
+def generate_blog_post_with_gemini():
+    api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
+    if not api_key:
+        print("경고: GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
+        today_str = datetime.now().strftime('%Y년 %m월 %d일')
+        return {
+            "title": f"[{today_str}] 제미나이 API 연동 테스트 포스팅",
+            "content": f"<h2>제미나이 API 키 미설정 안내</h2><p>GEMINI_API_KEY 환경변수를 확인해 주세요.</p>",
+            "labels": ["테스트", "BloggerAPI"]
+        }
+
+    client = genai.Client(api_key=api_key)
+
+    prompt = """
+너는 전문 블로그 콘텐츠 에디터야. 구글 블로그스팟에 포스팅할 높은 품질의 SEO 최적화 글을 작성해줘.
+
+[요구사항]
+1. 주제: 최근 이슈/트렌드, 유용한 정보/생활 팁, IT 기술, 금융/재테크 관련 내용 중 하나를 선택하여 흥미롭고 유익한 글을 써줘.
+2. 구성:
+   - 가독성이 좋은 소제목(<h2>, <h3>)과 깔끔한 문단(<p>), 리스트(<ul>, <li>) 등의 HTML 태그를 적극 활용해줘.
+   - 서론-본론-결론 구조로 작성해줘.
+3. 출력 형식:
+   다른 설명 없이 오직 순수한 JSON 형식으로만 응답해야 해.
+
+[JSON 응답 스키마]
+{
+  "title": "블로그 글 제목",
+  "content": "<p>HTML 형식의 블로그 본문 내용...</p>",
+  "labels": ["태그1", "태그2", "태그3"]
+}
+"""
+
+    # 사용할 모델 호환 순서 설정 (Fallback)
+    models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
+    response_text = None
+
+    for model_name in models_to_try:
+        try:
+            print(f"Gemini 모델 ({model_name}) 사용 시도 중...")
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt
+            )
+            if response and response.text:
+                response_text = response.text.strip()
+                print(f"모델 ({model_name}) 생성 성공!")
+                break
+        except Exception as e:
+            print(f"모델 ({model_name}) 호출 중 오류 발생: {e}")
+            time.sleep(2)
+
+    if not response_text:
+        print("Gemini AI 생성 실패로 기본 서식으로 포스팅을 진행합니다.")
+        today_str = datetime.now().strftime('%Y년 %m월 %d일')
+        return {
+            "title": f"[{today_str}] 일일 자동 포스팅",
+            "content": f"<h2>자동 포스팅 안내</h2><p>이 포스팅은 자동 예약 발행 시스템을 통해 발행되었습니다.</p>",
+            "labels": ["자동포스팅", "일일업데이트"]
+        }
+
+    # JSON 응답 파싱
+    try:
+        if response_text.startswith("```"):
+            lines = response_text.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            response_text = "\n".join(lines).strip()
+
+        return json.loads(response_text)
+    except Exception as e:
+        print(f"Gemini 응답 JSON 파싱 실패: {e}")
+        today_str = datetime.now().strftime('%Y년 %m월 %d일')
+        return {
+            "title": f"[{today_str}] Gemini AI 자동 포스팅",
+            "content": f"<div>{response_text}</div>",
+            "labels": ["AI포스팅", "Gemini"]
+        }
+
+def publish_post(blog_id, title, content, labels=None):
+    creds = get_credentials()
+    service = build('blogger', 'v3', credentials=creds)
+
+    body = {
+        'kind': 'blogger#post',
+        'title': title,
+        'content': content,
+        'labels': labels or []
+    }
+
+    request = service.posts().insert(blogId=blog_id, body=body)
+    response = request.execute()
+    print(f"[성공] 블로그 포스팅 완료!")
+    print(f"제목: {response.get('title')}")
+    print(f"URL: {response.get('url')}")
+    return response
 
 if __name__ == '__main__':
-    main()
+    blog_id = os.environ.get('BLOG_ID', '1709348241841827034')
+
+    print("Gemini AI를 통한 블로그 포스팅 내용 생성 중...")
+    post_data = generate_blog_post_with_gemini()
+
+    publish_post(blog_id, post_data.get('title'), post_data.get('content'), post_data.get('labels'))
