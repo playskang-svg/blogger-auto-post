@@ -10,7 +10,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-SCOPES = ['[https://www.googleapis.com/auth/blogger](https://www.googleapis.com/auth/blogger)']
+SCOPES = ['https://www.googleapis.com/auth/blogger']
 
 # --- 페이지 기본 설정 ---
 st.set_page_config(
@@ -59,7 +59,7 @@ def get_blogger_service():
                 if installed_or_web:
                     creds.client_id = installed_or_web.get('client_id')
                     creds.client_secret = installed_or_web.get('client_secret')
-                    creds.token_uri = installed_or_web.get('token_uri', '[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)')
+                    creds.token_uri = installed_or_web.get('token_uri', 'https://oauth2.googleapis.com/token')
 
         creds.refresh(Request())
         return build('blogger', 'v3', credentials=creds)
@@ -75,7 +75,7 @@ def generate_blog_post(topic, keywords, tone, structure, ad_code=""):
     clean_key = GEMINI_API_KEY.strip().strip("'").strip('"')
     
     # [수정] 모델 버전을 gemini-2.0-flash 로 수정 완료
-    url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=){clean_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={clean_key}"
     headers = {"Content-Type": "application/json"}
     
     # [수정] 프롬프트 문법 오류(SyntaxError) 해결 완료
