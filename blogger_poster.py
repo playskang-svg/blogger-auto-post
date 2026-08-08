@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import time
 from datetime import datetime
 from google import genai
 from google.oauth2.credentials import Credentials
@@ -36,7 +37,7 @@ def get_credentials():
 def generate_blog_post_with_gemini():
     api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
     if not api_key:
-        print("경고: GEMINI_API_KEY가 설정되지 않았습니다.")
+        print("경고: GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
         today_str = datetime.now().strftime('%Y년 %m월 %d일')
         return {
             "title": f"[{today_str}] 제미나이 API 연동 테스트 포스팅",
@@ -65,12 +66,33 @@ def generate_blog_post_with_gemini():
 }
 """
 
-    response = client.models.generate_content(
-        model='gemini-2.0-flash',
-        contents=prompt
-    )
+    # 무료 사용량이 가장 넉넉한 gemini-1.5-flash 모델 사용
+    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-pro']
+    response_text = None
 
-    response_text = response.text.strip()
+    for model_name in models_to_try:
+        try:
+            print(f"Gemini 모델 ({model_name}) 사용 시도 중...")
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt
+            )
+            if response and response.text:
+                response_text = response.text.strip()
+                print(f"모델 ({model_name}) 생성 성공!")
+                break
+        except Exception as e:
+            print(f"모델 ({model_name}) 호출 중 오류 발생: {e}")
+            time.sleep(2)
+
+    if not response_text:
+        print("모든 Gemini 모델 호출 실패로 기본 포스팅 양식을 발행합니다.")
+        today_str = datetime.now().strftime('%Y년 %m월 %d일')
+        return {
+            "title": f"[{today_str}] 일일 자동 포스팅",
+            "content": f"<h2>일일 자동 포스팅 안내</h2><p>본 포스팅은 자동 예약 시스템을 통해 발행되었습니다.</p>",
+            "labels": ["자동포스팅", "일일업데이트"]
+        }
 
     # JSON 응답 파싱
     try:
