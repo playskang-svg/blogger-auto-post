@@ -2,34 +2,56 @@ import os
 import sys
 import json
 import time
+import requests
 from datetime import datetime
-from google import genai
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
 SCOPES = ['https://www.googleapis.com/auth/blogger']
 
+# ============================================================
+# [블로그 포스팅 맞춤 설정]
+# ============================================================
+BLOG_CONFIG = {
+    "topic": "스마트폰 및 IT 실용 팁 / 정보",
+    "keywords": ["아이폰 꿀팁", "스마트폰 설정", "배터리 절약 방법"],
+    "tone": "친절하고 읽기 쉬운 전문 블로거 말투 (~해요, ~입니다)",
+    "structure": """
+    1. 서론: 독자의 호기심을 유발하는 도입부
+    2. 본론 1: 주요 원인 또는 핵심 개념 설명 (소제목 <h2>)
+    3. 본론 2: 구체적인 해결 방법 및 단계별 안내 (소제목 <h2> 및 <ul>, <li> 리스트)
+    4. 본론 3: 실전 사용 시 주의사항 및 꿀팁 (소제목 <h2>)
+    5. 결론: 전체 핵심 요약 및 마무리 인사
+    """
+}
+
 def get_credentials():
     token_json_str = os.environ.get('BLOGGER_TOKEN_JSON')
-    client_secret_json_str = os.environ.get('BLOGGER_CLIENT_SECRET_JSON')
 
     if not token_json_str:
         print("오류: BLOGGER_TOKEN_JSON 환경변수가 설정되지 않았습니다.")
         sys.exit(1)
 
     token_info = json.loads(token_json_str)
-    creds = Credentials.from_authorized_user_info(token_info, SCOPES)
-
-    if creds and creds.expired and creds.refresh_token:
-        if client_secret_json_str:
+    
+    # client_secret_json 정보가 있으면 token_info에 추가 반영
+    client_secret_json_str = os.environ.get('BLOGGER_CLIENT_SECRET_JSON')
+    if client_secret_json_str:
+        try:
             client_info = json.loads(client_secret_json_str)
             installed_or_web = client_info.get('installed') or client_info.get('web')
             if installed_or_web:
-                creds.client_id = installed_or_web.get('client_id')
-                creds.client_secret = installed_or_web.get('client_secret')
-                creds.token_uri = installed_or_web.get('token_uri', 'https://oauth2.googleapis.com/token')
+                if not token_info.get('client_id'):
+                    token_info['client_id'] = installed_or_web.get('client_id')
+                if not token_info.get('client_secret'):
+                    token_info['client_secret'] = installed_or_web.get('client_secret')
+        except Exception as e:
+            print(f"client_secret 정보 파싱 참고: {e}")
 
+    creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+
+    if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
 
     return creds
@@ -45,48 +67,68 @@ def generate_blog_post_with_gemini():
             "labels": ["테스트", "BloggerAPI"]
         }
 
-    client = genai.Client(api_key=api_key)
+    clean_api_key = api_key.strip().strip("'").strip('"')
 
-    prompt = """
+    keywords_str = ", ".join(BLOG_CONFIG["keywords"])
+    prompt = f"""
 너는 전문 블로그 콘텐츠 에디터야. 구글 블로그스팟에 포스팅할 높은 품질의 SEO 최적화 글을 작성해줘.
 
-[요구사항]
-1. 주제: 최근 이슈/트렌드, 유용한 정보/생활 팁, IT 기술, 금융/재테크 관련 내용 중 하나를 선택하여 흥미롭고 유익한 글을 써줘.
-2. 구성:
-   - 가독성이 좋은 소제목(<h2>, <h3>)과 깔끔한 문단(<p>), 리스트(<ul>, <li>) 등의 HTML 태그를 적극 활용해줘.
-   - 서론-본론-결론 구조로 작성해줘.
-3. 출력 형식:
-   다른 설명 없이 오직 순수한 JSON 형식으로만 응답해야 해.
+[포스팅 가이드라인]
+1. 주제: {BLOG_CONFIG['topic']}
+2. 필수 포함 키워드: {keywords_str}
+3. 말투/ 어조: {BLOG_CONFIG['tone']}
+4. 글 구조:
+{BLOG_CONFIG['structure']}
+
+[작성 규칙]
+- 검색 엔진(SEO)에 최적화된 매력적인 제목을 지어줘.
+- HTML 태그(<h2>, <h3>, <p>, <ul>, <li>, <b>)를 적극 사용해줘.
+- 반드시 다른 설명 없이 오직 순수한 JSON 형식으로만 응답해야 해.
 
 [JSON 응답 스키마]
-{
+{{
   "title": "블로그 글 제목",
   "content": "<p>HTML 형식의 블로그 본문 내용...</p>",
   "labels": ["태그1", "태그2", "태그3"]
-}
+}}
 """
 
-    # 무료 사용량이 가장 넉넉한 gemini-1.5-flash 모델 사용
-    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-pro']
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={clean_api_key}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json"
+        }
+    }
+
     response_text = None
 
-    for model_name in models_to_try:
+    for attempt in range(3):
         try:
-            print(f"Gemini 모델 ({model_name}) 사용 시도 중...")
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt
-            )
-            if response and response.text:
-                response_text = response.text.strip()
-                print(f"모델 ({model_name}) 생성 성공!")
-                break
+            res = requests.post(url, headers=headers, json=payload, timeout=30)
+            res_json = res.json()
+
+            if res.status_code == 200:
+                candidates = res_json.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        response_text = parts[0].get("text", "").strip()
+                        print("gemini-2.0-flash 생성 성공!")
+                        break
+            elif res.status_code == 429:
+                print(f"API 요청 한도 대기 중 (429)... 7초 후 재시도 ({attempt+1}/3)")
+                time.sleep(7)
+            else:
+                print(f"HTTP {res.status_code}: {res_json}")
+                time.sleep(2)
         except Exception as e:
-            print(f"모델 ({model_name}) 호출 중 오류 발생: {e}")
+            print(f"호출 에러: {e}")
             time.sleep(2)
 
     if not response_text:
-        print("모든 Gemini 모델 호출 실패로 기본 포스팅 양식을 발행합니다.")
+        print("Gemini API 대기 한도로 기본 포스팅 양식을 발행합니다.")
         today_str = datetime.now().strftime('%Y년 %m월 %d일')
         return {
             "title": f"[{today_str}] 일일 자동 포스팅",
@@ -94,7 +136,6 @@ def generate_blog_post_with_gemini():
             "labels": ["자동포스팅", "일일업데이트"]
         }
 
-    # JSON 응답 파싱
     try:
         if response_text.startswith("```"):
             lines = response_text.splitlines()
@@ -133,7 +174,7 @@ def publish_post(blog_id, title, content, labels=None):
     return response
 
 if __name__ == '__main__':
-    blog_id = os.environ.get('BLOG_ID', '1709348241841827034')
+    blog_id = os.environ.get('BLOG_ID', '5571572496232571585')
 
     print("Gemini AI를 통한 블로그 포스팅 내용 생성 중...")
     post_data = generate_blog_post_with_gemini()
