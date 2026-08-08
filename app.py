@@ -2,10 +2,10 @@ import os
 import sys
 import json
 import time
+import requests
 import traceback
 from datetime import datetime
 import streamlit as st
-from google import genai
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
@@ -26,7 +26,7 @@ def get_config_val(key):
         if key in st.secrets:
             return st.secrets[key]
     except Exception as e:
-        st.warning(f"Secrets 파싱 경고 ({key}): {e}")
+        pass
     return os.environ.get(key, "")
 
 BLOG_ID = get_config_val("BLOG_ID") or "5571572496232571585"
@@ -34,7 +34,7 @@ CLIENT_SECRET_JSON_STR = get_config_val("BLOGGER_CLIENT_SECRET_JSON")
 TOKEN_JSON_STR = get_config_val("BLOGGER_TOKEN_JSON")
 GEMINI_API_KEY = get_config_val("GEMINI_API_KEY")
 
-# 설정값 사전 디버그 점검 (화면 상단)
+# 설정값 사전 디버그 점검
 with st.expander("🔍 설정값 보관함 점검 상태 (클릭하여 확인)"):
     st.write(f"- **BLOG_ID**: {'✅ 설정됨' if BLOG_ID else '❌ 미설정'}")
     st.write(f"- **BLOGGER_CLIENT_SECRET_JSON**: {'✅ 설정됨' if CLIENT_SECRET_JSON_STR else '❌ 미설정'}")
@@ -71,11 +71,6 @@ def generate_blog_post(topic, keywords, tone, structure):
     if not GEMINI_API_KEY:
         return None, "GEMINI_API_KEY 설정값이 누락되었습니다. Streamlit Secrets을 확인해 주세요."
 
-    try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-    except Exception as e:
-        return None, f"Gemini Client 초기화 실패: {e}\n{traceback.format_exc()}"
-
     prompt = f"""
 너는 전문 블로그 콘텐츠 에디터야. 구글 블로그스팟에 포스팅할 높은 품질의 SEO 최적화 글을 작성해줘.
 
@@ -103,15 +98,31 @@ def generate_blog_post(topic, keywords, tone, structure):
     response_text = None
     errors_log = []
 
+    clean_api_key = GEMINI_API_KEY.strip().strip("'").strip('"')
+
     for model_name in models_to_try:
         try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt
-            )
-            if response and response.text:
-                response_text = response.text.strip()
-                break
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={clean_api_key}"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "responseMimeType": "application/json"
+                }
+            }
+            res = requests.post(url, headers=headers, json=payload, timeout=30)
+            res_json = res.json()
+
+            if res.status_code == 200:
+                candidates = res_json.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        response_text = parts[0].get("text", "").strip()
+                        break
+            else:
+                err_info = res_json.get("error", {}).get("message", res.text)
+                errors_log.append(f"[{model_name}] HTTP {res.status_code}: {err_info}")
         except Exception as e:
             errors_log.append(f"[{model_name}] {e}")
             time.sleep(1)
