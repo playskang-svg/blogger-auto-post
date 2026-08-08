@@ -12,6 +12,7 @@ from googleapiclient.discovery import build
 
 SCOPES = ['https://www.googleapis.com/auth/blogger']
 
+# --- 페이지 기본 설정 ---
 st.set_page_config(
     page_title="Blogger AI 자동 발행 대시보드",
     page_icon="📝",
@@ -21,6 +22,7 @@ st.set_page_config(
 st.title("📝 Blogger AI 포스팅 대시보드")
 st.caption("주제와 키워드를 입력하고 버튼을 누르면 Gemini AI가 글을 작성하고 자동 발행합니다.")
 
+# --- 환경 변수 로드 ---
 def get_config_val(key):
     try:
         if hasattr(st, "secrets") and key in st.secrets:
@@ -40,6 +42,7 @@ with st.expander("🔍 설정 상태 점검"):
     st.write(f"- TOKEN: {'✅ 설정됨' if TOKEN_JSON_STR else '❌ 미설정'}")
     st.write(f"- GEMINI_API_KEY: {'✅ 설정됨' if GEMINI_API_KEY else '❌ 미설정'}")
 
+# --- Blogger 서비스 인증 ---
 def get_blogger_service():
     if not TOKEN_JSON_STR:
         st.error("BLOGGER_TOKEN_JSON 설정이 누락되었습니다.")
@@ -64,13 +67,92 @@ def get_blogger_service():
         st.error(f"Blogger 인증 오류: {e}")
         return None
 
-def generate_blog_post(topic, keywords, tone, structure):
+# --- Gemini API 콘텐츠 생성 ---
+def generate_blog_post(topic, keywords, tone, structure, ad_code=""):
     if not GEMINI_API_KEY:
         return None, "GEMINI_API_KEY가 설정되지 않았습니다."
 
     clean_key = GEMINI_API_KEY.strip().strip("'").strip('"')
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={clean_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
     headers = {"Content-Type": "application/json"}
     
-    prompt = f"""
-너는 전문 블로그 콘텐츠 에디터야. 구글 블로그스팟에 포스팅할 높은 품질의 SEO 최적화 글을
+    # 닫히지 않았던 삼중 따옴표(f""") 문제 해결 및 조건 세분화
+    prompt = f"""너는 전문 블로그 콘텐츠 에디터야. 구글 블로그스팟에 포스팅할 높은 품질의 SEO 최적화 글을 작성해줘.
+
+[작성 조건]
+- 주제: {topic}
+- 키워드: {keywords}
+- 어조: {tone}
+- 구조: {structure}
+- 출력 포맷: HTML 형식 (<h2>, <h3>, <p>, <ul>, <li> 등 적절히 활용)
+- 주의사항 1: 결과물에 '블로그제목:' 이라는 텍스트는 절대 포함하지 말 것.
+- 주의사항 2: 전달하는 광고 코드가 있을 경우, 구조가 절대 흐트러지지 않게 원본 그대로 본문에 삽입할 것.
+
+광고 코드:
+{ad_code if ad_code else '없음'}
+"""
+    
+    data = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        result = response.json()
+        generated_text = result['candidates'][0]['content']['parts'][0]['text']
+        return generated_text, None
+    except Exception as e:
+        return None, f"API 호출 중 오류 발생: {e}"
+
+# --- UI 및 실행 로직 ---
+st.subheader("📝 포스팅 작성 설정")
+topic = st.text_input("포스팅 주제", placeholder="예: 2026년 최신 IT 트렌드")
+keywords = st.text_input("핵심 키워드", placeholder="예: 인공지능, 챗봇, 자동화 (쉼표로 구분)")
+
+col1, col2 = st.columns(2)
+with col1:
+    tone = st.selectbox("어조 (Tone)", ["전문적인", "친근한", "유머러스한", "설득력 있는"])
+with col2:
+    structure = st.selectbox("글 구조", ["서론-본론-결론", "리스트형 (Top 5 등)", "Q&A 형식"])
+
+ad_code_input = st.text_area("삽입할 광고 코드 (선택 사항)", placeholder="<script>...</script> 형식의 애드센스 등 코드")
+
+if st.button("🚀 포스팅 생성 및 자동 발행하기"):
+    if not topic:
+        st.warning("포스팅 주제를 입력해주세요.")
+    else:
+        with st.spinner("Gemini AI가 포스팅을 작성 중입니다... (약 10~20초 소요)"):
+            content, error = generate_blog_post(topic, keywords, tone, structure, ad_code_input)
+            
+            if error:
+                st.error(error)
+            else:
+                st.success("✅ 포스팅 내용 생성 완료!")
+                
+                with st.expander("미리보기 및 HTML 소스 확인"):
+                    st.markdown(content, unsafe_allow_html=True)
+                    st.code(content, language='html')
+                
+                st.info("Blogger에 포스팅을 발행합니다...")
+                
+                service = get_blogger_service()
+                if service:
+                    try:
+                        # 포스팅 정보 구성
+                        post_body = {
+                            "title": topic,
+                            "content": content
+                        }
+                        
+                        # API를 통해 발행 수행
+                        request = service.posts().insert(blogId=BLOG_ID, body=post_body)
+                        response = request.execute()
+                        
+                        st.success(f"🎉 성공적으로 발행되었습니다! [포스트 보러가기]({response.get('url')})")
+                    except Exception as e:
+                        st.error(f"Blogger 발행 중 오류 발생: {e}")
+                else:
+                    st.error("Blogger 서비스 인증에 실패하여 발행하지 못했습니다. 설정 상태를 확인해 주세요.")
