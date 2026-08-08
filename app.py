@@ -10,7 +10,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-SCOPES = ['https://www.googleapis.com/auth/blogger']
+SCOPES = ['[https://www.googleapis.com/auth/blogger](https://www.googleapis.com/auth/blogger)']
 
 # --- 페이지 기본 설정 ---
 st.set_page_config(
@@ -59,7 +59,7 @@ def get_blogger_service():
                 if installed_or_web:
                     creds.client_id = installed_or_web.get('client_id')
                     creds.client_secret = installed_or_web.get('client_secret')
-                    creds.token_uri = installed_or_web.get('token_uri', 'https://oauth2.googleapis.com/token')
+                    creds.token_uri = installed_or_web.get('token_uri', '[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)')
 
         creds.refresh(Request())
         return build('blogger', 'v3', credentials=creds)
@@ -73,7 +73,7 @@ def generate_blog_post(topic, keywords, tone, structure, ad_code=""):
         return None, "GEMINI_API_KEY가 설정되지 않았습니다."
 
     clean_key = GEMINI_API_KEY.strip().strip("'").strip('"')
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={clean_key}"
+    url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=){clean_key}"
     headers = {"Content-Type": "application/json"}
     
     prompt = f"""너는 전문 블로그 콘텐츠 에디터야. 구글 블로그스팟에 포스팅할 높은 품질의 SEO 최적화 글을 작성해줘.
