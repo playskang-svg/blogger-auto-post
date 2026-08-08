@@ -10,7 +10,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-SCOPES = ['https://www.googleapis.com/auth/blogger']
+SCOPES = ['[https://www.googleapis.com/auth/blogger](https://www.googleapis.com/auth/blogger)']
 
 # --- 페이지 기본 설정 ---
 st.set_page_config(
@@ -59,7 +59,7 @@ def get_blogger_service():
                 if installed_or_web:
                     creds.client_id = installed_or_web.get('client_id')
                     creds.client_secret = installed_or_web.get('client_secret')
-                    creds.token_uri = installed_or_web.get('token_uri', 'https://oauth2.googleapis.com/token')
+                    creds.token_uri = installed_or_web.get('token_uri', '[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)')
 
         creds.refresh(Request())
         return build('blogger', 'v3', credentials=creds)
@@ -73,10 +73,12 @@ def generate_blog_post(topic, keywords, tone, structure, ad_code=""):
         return None, "GEMINI_API_KEY가 설정되지 않았습니다."
 
     clean_key = GEMINI_API_KEY.strip().strip("'").strip('"')
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
+    
+    # [수정] 모델 버전을 gemini-2.0-flash 로 수정 완료
+    url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=){clean_key}"
     headers = {"Content-Type": "application/json"}
     
-    # 닫히지 않았던 삼중 따옴표(f""") 문제 해결 및 조건 세분화
+    # [수정] 프롬프트 문법 오류(SyntaxError) 해결 완료
     prompt = f"""너는 전문 블로그 콘텐츠 에디터야. 구글 블로그스팟에 포스팅할 높은 품질의 SEO 최적화 글을 작성해줘.
 
 [작성 조건]
@@ -85,7 +87,7 @@ def generate_blog_post(topic, keywords, tone, structure, ad_code=""):
 - 어조: {tone}
 - 구조: {structure}
 - 출력 포맷: HTML 형식 (<h2>, <h3>, <p>, <ul>, <li> 등 적절히 활용)
-- 주의사항 1: 결과물에 '블로그제목:' 이라는 텍스트는 절대 포함하지 말 것.
+- 주의사항 1: 결과물에 '블로그제목:' 이라는 텍스트는 절대 포함하지 말 것. 오직 본문만 작성할 것.
 - 주의사항 2: 전달하는 광고 코드가 있을 경우, 구조가 절대 흐트러지지 않게 원본 그대로 본문에 삽입할 것.
 
 광고 코드:
@@ -103,9 +105,21 @@ def generate_blog_post(topic, keywords, tone, structure, ad_code=""):
         response.raise_for_status()
         result = response.json()
         generated_text = result['candidates'][0]['content']['parts'][0]['text']
+        
+        # 만약 마크다운 HTML 코드블럭(```html ... ```)으로 감싸져 있다면 제거
+        if generated_text.startswith("```"):
+            lines = generated_text.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            generated_text = "\n".join(lines).strip()
+            
         return generated_text, None
+    except requests.exceptions.HTTPError as err:
+        return None, f"API 호출 중 HTTP 에러 발생: {err}"
     except Exception as e:
-        return None, f"API 호출 중 오류 발생: {e}"
+        return None, f"API 호출 중 알 수 없는 오류 발생: {e}"
 
 # --- UI 및 실행 로직 ---
 st.subheader("📝 포스팅 작성 설정")
@@ -141,13 +155,11 @@ if st.button("🚀 포스팅 생성 및 자동 발행하기"):
                 service = get_blogger_service()
                 if service:
                     try:
-                        # 포스팅 정보 구성
                         post_body = {
                             "title": topic,
                             "content": content
                         }
                         
-                        # API를 통해 발행 수행
                         request = service.posts().insert(blogId=BLOG_ID, body=post_body)
                         response = request.execute()
                         
