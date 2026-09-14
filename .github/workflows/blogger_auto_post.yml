@@ -5,6 +5,11 @@ on:
     # 매일 한국 시간 오전 9시 (UTC 00:00) 자동 실행
     - cron: '0 0 * * *'
   workflow_dispatch:
+    inputs:
+      validate_only:
+        description: '글을 발행하지 않고 Blogger/Gemini 인증만 점검'
+        type: boolean
+        default: true
 
 jobs:
   auto_post:
@@ -30,5 +35,6 @@ jobs:
         BLOGGER_CLIENT_SECRET_JSON: ${{ secrets.BLOGGER_CLIENT_SECRET_JSON }}
         BLOGGER_TOKEN_JSON: ${{ secrets.BLOGGER_TOKEN_JSON }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        VALIDATE_ONLY: ${{ inputs.validate_only || 'false' }}
       run: |
         python blogger_poster.py

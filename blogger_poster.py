@@ -173,8 +173,29 @@ def publish_post(blog_id, title, content, labels=None):
     print(f"URL: {response.get('url')}")
     return response
 
+def validate_configuration(blog_id):
+    """Validate external credentials without creating a Blogger post."""
+    creds = get_credentials()
+    service = build('blogger', 'v3', credentials=creds)
+    blog = service.blogs().get(blogId=blog_id).execute()
+
+    api_key = os.environ.get('GEMINI_API_KEY', '').strip().strip("'").strip('"')
+    if not api_key:
+        raise RuntimeError('GEMINI_API_KEY가 설정되지 않았습니다.')
+    response = requests.get(
+        'https://generativelanguage.googleapis.com/v1beta/models',
+        params={'key': api_key},
+        timeout=30,
+    )
+    response.raise_for_status()
+    print(f"[성공] 인증 점검 완료: {blog.get('name', blog_id)} / Gemini API")
+
 if __name__ == '__main__':
     blog_id = os.environ.get('BLOG_ID', '5571572496232571585')
+
+    if os.environ.get('VALIDATE_ONLY', '').lower() == 'true':
+        validate_configuration(blog_id)
+        sys.exit(0)
 
     print("Gemini AI를 통한 블로그 포스팅 내용 생성 중...")
     post_data = generate_blog_post_with_gemini()
