@@ -1,40 +1,80 @@
 name: Blogger Auto Posting with Gemini AI
 
 on:
-  schedule:
-    # 매일 한국 시간 오전 9시 (UTC 00:00) 자동 실행
-    - cron: '0 0 * * *'
+  # 1. 깃허브 웹 화면에서 마우스로 직접 실행할 때
   workflow_dispatch:
     inputs:
-      validate_only:
-        description: '글을 발행하지 않고 Blogger/Gemini 인증만 점검'
+      blog_target:
+        description: '📌 1. 발행할 블로그 선택'
+        required: true
+        type: choice
+        default: 'atttrip'
+        options:
+          - 'atttrip'      # 아토트립 (반려견 동반 여행정보)
+          - 'suriwiki'     # 수리위키 / 꿀팁뉴스 (생활 수리 및 살림 정보)
+          - 'vpn_adbles'   # VPN-Adbles (IT 보안 및 할인 정보)
+
+      topic_prompt:
+        description: '✍️ 2. 포스팅 주제 및 추가 지침'
+        required: true
+        type: string
+        default: '2026 가평 반려견 동반 숙소 BEST 4: 북한강 뷰 독채 풀빌라부터 잔디마당 펜션까지'
+
+      schedule_hours:
+        description: '⏰ 3. 기준 예약 발행 간격(시간 단위). 예: 4.0 (0이면 즉시발행)'
+        required: true
+        type: string
+        default: '4.0'
+
+      use_jitter:
+        description: '🎲 4. 불규칙 예약 미세 조정 (사람처럼 ±20분 자연스러운 편차 무작위 적용)'
+        required: true
         type: boolean
         default: true
+
+      is_draft:
+        description: '📝 5. 발행 없이 임시보관(초안)으로만 저장'
+        required: false
+        type: boolean
+        default: false
+
+  # 2. 정해진 시간마다 사람이 안 눌러도 자동 실행
+  schedule:
+    - cron: '0 */4 * * *'  # 4시간마다 1번씩 자동 실행
 
 jobs:
   auto_post:
     runs-on: ubuntu-latest
 
     steps:
-    - name: 코드 체크아웃
-      uses: actions/checkout@v6
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
 
-    - name: Python 3.12 세팅
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.12'
+      - name: Python 3.12 세팅
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-    - name: 패키지 설치
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: 패키지 설치
+        run: |
+          pip install --upgrade google-auth google-auth-oauthlib google-api-python-client google-generativeai
 
-    - name: Gemini AI 글 생성 및 Blogger 포스팅 실행
-      env:
-        BLOG_ID: ${{ secrets.BLOG_ID }}
-        BLOGGER_CLIENT_SECRET_JSON: ${{ secrets.BLOGGER_CLIENT_SECRET_JSON }}
-        BLOGGER_TOKEN_JSON: ${{ secrets.BLOGGER_TOKEN_JSON }}
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        VALIDATE_ONLY: ${{ inputs.validate_only || 'false' }}
-      run: |
-        python blogger_poster.py
+      - name: Gemini AI 글 생성 및 Blogger 포스팅 실행
+        env:
+          BLOGGER_TOKEN_JSON: ${{ secrets.BLOGGER_TOKEN_JSON }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BLOG_ID: ${{ secrets.BLOG_ID }}
+        run: |
+          EXTRA_FLAGS=""
+          if [ "${{ inputs.use_jitter }}" = "false" ]; then
+            EXTRA_FLAGS="$EXTRA_FLAGS --no-jitter"
+          fi
+          if [ "${{ inputs.is_draft }}" = "true" ]; then
+            EXTRA_FLAGS="$EXTRA_FLAGS --draft"
+          fi
+
+          python blogger_poster.py \
+            --blog "${{ inputs.blog_target || 'atttrip' }}" \
+            --topic "${{ inputs.topic_prompt || '2026 가평 반려견 동반 숙소 추천 BEST 4' }}" \
+            --schedule-hours "${{ inputs.schedule_hours || '4.0' }}" \
+            $EXTRA_FLAGS

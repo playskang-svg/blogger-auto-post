@@ -1,203 +1,143 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Blogger Multi-Blog Auto Publisher with Gemini AI & Irregular Scheduler
+"""
+
 import os
 import sys
 import json
-import time
-import requests
-from datetime import datetime
+import random
+import argparse
+from datetime import datetime, timedelta
+
 from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+import google.generativeai as genai
 
-SCOPES = ['https://www.googleapis.com/auth/blogger']
-
-# ============================================================
-# [블로그 포스팅 맞춤 설정]
-# ============================================================
-BLOG_CONFIG = {
-    "topic": "스마트폰 및 IT 실용 팁 / 정보",
-    "keywords": ["아이폰 꿀팁", "스마트폰 설정", "배터리 절약 방법"],
-    "tone": "친절하고 읽기 쉬운 전문 블로거 말투 (~해요, ~입니다)",
-    "structure": """
-    1. 서론: 독자의 호기심을 유발하는 도입부
-    2. 본론 1: 주요 원인 또는 핵심 개념 설명 (소제목 <h2>)
-    3. 본론 2: 구체적인 해결 방법 및 단계별 안내 (소제목 <h2> 및 <ul>, <li> 리스트)
-    4. 본론 3: 실전 사용 시 주의사항 및 꿀팁 (소제목 <h2>)
-    5. 결론: 전체 핵심 요약 및 마무리 인사
-    """
+# 1. 다중 블로그 설정
+BLOGS_CONFIG = {
+    "atttrip": {
+        "id": "3287113241520886880",
+        "name": "아토트립 (반려견 동반 여행정보)",
+        "default_labels": ["반려견 숙소", "반려견 여행", "애견동반 펜션", "아토트립"],
+        "persona": (
+            "당신은 대한민국 1등 반려견 동반 여행 전문 에디터 '아토 아빠'입니다. "
+            "친절하고 신뢰감 넘치는 따뜻한 어조로 작성합니다. "
+            "견주들이 가장 궁금해하는 [안전 펜스(울타리) 높이], [체중/견종 제한], [전용 어메니티 및 오프리시 잔디마당], "
+            "[실내 미끄럼 방지 매트] 정보를 반드시 구체적인 수치와 함께 상세히 분석해야 합니다."
+        )
+    },
+    "suriwiki": {
+        "id": "5571572496232571585",
+        "name": "수리위키 / 꿀팁뉴스",
+        "default_labels": ["생활 수리", "생활 꿀팁", "비용 절약", "가전 점검"],
+        "persona": (
+            "당신은 실생활 기술 수리 및 살림 비용 절약 꿀팁을 전하는 20년 경력의 '수리 마스터'입니다. "
+            "[자가 점검 체크리스트], [필요 공구], [업체 호출 비용 vs 셀프 수리 비용 비교], "
+            "[주의해야 할 안전 수칙]을 단계별(Step-by-Step)로 깔끔하게 정리해야 합니다."
+        )
+    },
+    "vpn_adbles": {
+        "id": "5571572496232571585",
+        "name": "VPN-Adbles",
+        "default_labels": ["VPN 추천", "네트워크 보안", "할인 프로모션", "해외 스트리밍"],
+        "persona": (
+            "당신은 글로벌 IT 인프라 및 사이버 보안 전문가입니다. "
+            "[암호화 프로토콜 성능], [국가별 서버 속도(Ping/Mbps)], [OTT 스트리밍 언락 호환성], "
+            "[최대 할인 프로모션 혜택 적용법]을 전문적이면서도 쉽게 설명해야 합니다."
+        )
+    }
 }
 
+SCOPES = ["https://www.googleapis.com/auth/blogger"]
+
 def get_credentials():
-    token_json_str = os.environ.get('BLOGGER_TOKEN_JSON')
-
+    token_json_str = os.environ.get("BLOGGER_TOKEN_JSON")
     if not token_json_str:
-        print("오류: BLOGGER_TOKEN_JSON 환경변수가 설정되지 않았습니다.")
+        print("[ERROR] BLOGGER_TOKEN_JSON 환경변수가 없습니다.", file=sys.stderr)
         sys.exit(1)
-
     token_info = json.loads(token_json_str)
+    return Credentials.from_authorized_user_info(token_info, SCOPES)
+
+def calculate_natural_schedule_time(base_hours=4.0, apply_jitter=True):
+    now_kst = datetime.utcnow() + timedelta(hours=9)
+    jitter_minutes = random.randint(-20, 25) if apply_jitter else 0
+    target_kst = (now_kst + timedelta(hours=base_hours, minutes=jitter_minutes)).replace(second=0, microsecond=0)
     
-    # client_secret_json 정보가 있으면 token_info에 추가 반영
-    client_secret_json_str = os.environ.get('BLOGGER_CLIENT_SECRET_JSON')
-    if client_secret_json_str:
-        try:
-            client_info = json.loads(client_secret_json_str)
-            installed_or_web = client_info.get('installed') or client_info.get('web')
-            if installed_or_web:
-                if not token_info.get('client_id'):
-                    token_info['client_id'] = installed_or_web.get('client_id')
-                if not token_info.get('client_secret'):
-                    token_info['client_secret'] = installed_or_web.get('client_secret')
-        except Exception as e:
-            print(f"client_secret 정보 파싱 참고: {e}")
+    rfc3339_str = target_kst.strftime("%Y-%m-%dT%H:%M:00+09:00")
+    readable_str = target_kst.strftime("%Y년 %m월 %d일 %p %I시 %M분")
+    return rfc3339_str, readable_str, jitter_minutes
 
-    creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+def generate_post_content(blog_cfg, user_topic):
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    if not gemini_key:
+        return f"<h2>{user_topic} 핵심 총정리</h2><p>본 포스팅은 {blog_cfg['name']} 공식 가이드입니다.</p>"
 
-    if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+    genai.configure(api_key=gemini_key)
+    model = genai.GenerativeModel("gemini-1.5-flash")
 
-    return creds
-
-def generate_blog_post_with_gemini():
-    api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
-    if not api_key:
-        print("경고: GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
-        today_str = datetime.now().strftime('%Y년 %m월 %d일')
-        return {
-            "title": f"[{today_str}] 제미나이 API 연동 테스트 포스팅",
-            "content": f"<h2>제미나이 API 키 미설정 안내</h2><p>GEMINI_API_KEY 환경변수를 확인해 주세요.</p>",
-            "labels": ["테스트", "BloggerAPI"]
-        }
-
-    clean_api_key = api_key.strip().strip("'").strip('"')
-
-    keywords_str = ", ".join(BLOG_CONFIG["keywords"])
     prompt = f"""
-너는 전문 블로그 콘텐츠 에디터야. 구글 블로그스팟에 포스팅할 높은 품질의 SEO 최적화 글을 작성해줘.
+    당신은 블로그 글 작성 최고 전문가입니다.
+    아래 [블로그 페르소나]와 [작성 지침]에 맞춰 네이버/구글 검색 상위 노출에 최적화된 고품질 블로그 글(HTML 본문)을 작성하세요.
 
-[포스팅 가이드라인]
-1. 주제: {BLOG_CONFIG['topic']}
-2. 필수 포함 키워드: {keywords_str}
-3. 말투/ 어조: {BLOG_CONFIG['tone']}
-4. 글 구조:
-{BLOG_CONFIG['structure']}
+    [대상 블로그]: {blog_cfg['name']}
+    [블로그 페르소나]: {blog_cfg['persona']}
+    [요청 주제]: {user_topic}
 
-[작성 규칙]
-- 검색 엔진(SEO)에 최적화된 매력적인 제목을 지어줘.
-- HTML 태그(<h2>, <h3>, <p>, <ul>, <li>, <b>)를 적극 사용해줘.
-- 반드시 다른 설명 없이 오직 순수한 JSON 형식으로만 응답해야 해.
+    [HTML 필수 규칙]:
+    1. <html>, <body> 없이 <h2>, <h3>, <p>, <ul>, <li>, <strong> 본문 조각만 출력할 것.
+    2. 수동 목차 박스는 절대 넣지 말 것 (스킨이 자동 목차 생성).
+    3. 최소 4개 이상의 <h2> 섹션으로 심층 비교 및 핵심 정보 제공.
+    4. 본문 중간에 고화질 관련 Unsplash 사진 태그 1~2개 포함 (alt 태그에 검색 키워드 완벽 반영).
+    5. 마지막에 독자를 위한 요약 체크리스트(<ul>) 및 격려 맺음말 포함.
+    """
+    resp = model.generate_content(prompt)
+    content = resp.text.strip()
+    if content.startswith("```html"): content = content[7:]
+    if content.startswith("```"): content = content[3:]
+    if content.endswith("```"): content = content[:-3]
+    return content.strip()
 
-[JSON 응답 스키마]
-{{
-  "title": "블로그 글 제목",
-  "content": "<p>HTML 형식의 블로그 본문 내용...</p>",
-  "labels": ["태그1", "태그2", "태그3"]
-}}
-"""
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={clean_api_key}"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "responseMimeType": "application/json"
-        }
-    }
-
-    response_text = None
-
-    for attempt in range(3):
-        try:
-            res = requests.post(url, headers=headers, json=payload, timeout=30)
-            res_json = res.json()
-
-            if res.status_code == 200:
-                candidates = res_json.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts:
-                        response_text = parts[0].get("text", "").strip()
-                        print("gemini-2.0-flash 생성 성공!")
-                        break
-            elif res.status_code == 429:
-                print(f"API 요청 한도 대기 중 (429)... 7초 후 재시도 ({attempt+1}/3)")
-                time.sleep(7)
-            else:
-                print(f"HTTP {res.status_code}: {res_json}")
-                time.sleep(2)
-        except Exception as e:
-            print(f"호출 에러: {e}")
-            time.sleep(2)
-
-    if not response_text:
-        print("Gemini API 대기 한도로 기본 포스팅 양식을 발행합니다.")
-        today_str = datetime.now().strftime('%Y년 %m월 %d일')
-        return {
-            "title": f"[{today_str}] 일일 자동 포스팅",
-            "content": f"<h2>일일 자동 포스팅 안내</h2><p>본 포스팅은 자동 예약 시스템을 통해 발행되었습니다.</p>",
-            "labels": ["자동포스팅", "일일업데이트"]
-        }
-
-    try:
-        if response_text.startswith("```"):
-            lines = response_text.splitlines()
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            response_text = "\n".join(lines).strip()
-
-        return json.loads(response_text)
-    except Exception as e:
-        print(f"Gemini 응답 JSON 파싱 실패: {e}")
-        today_str = datetime.now().strftime('%Y년 %m월 %d일')
-        return {
-            "title": f"[{today_str}] Gemini AI 자동 포스팅",
-            "content": f"<div>{response_text}</div>",
-            "labels": ["AI포스팅", "Gemini"]
-        }
-
-def publish_post(blog_id, title, content, labels=None):
+def publish_to_blogger(blog_id, title, html_content, labels, schedule_iso=None, is_draft=False):
     creds = get_credentials()
-    service = build('blogger', 'v3', credentials=creds)
+    service = build("blogger", "v3", credentials=creds)
 
     body = {
-        'kind': 'blogger#post',
-        'title': title,
-        'content': content,
-        'labels': labels or []
+        "kind": "blogger#post",
+        "blog": {"id": blog_id},
+        "title": title,
+        "content": html_content,
+        "labels": labels
     }
+    if schedule_iso:
+        body["published"] = schedule_iso
+        is_draft = True
 
-    request = service.posts().insert(blogId=blog_id, body=body)
-    response = request.execute()
-    print(f"[성공] 블로그 포스팅 완료!")
-    print(f"제목: {response.get('title')}")
-    print(f"URL: {response.get('url')}")
-    return response
+    req = service.posts().insert(blogId=blog_id, body=body, isDraft=is_draft)
+    return req.execute()
 
-def validate_configuration(blog_id):
-    """Validate external credentials without creating a Blogger post."""
-    creds = get_credentials()
-    service = build('blogger', 'v3', credentials=creds)
-    blog = service.blogs().get(blogId=blog_id).execute()
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--blog", choices=list(BLOGS_CONFIG.keys()), default="atttrip")
+    parser.add_argument("--topic", required=True)
+    parser.add_argument("--schedule-hours", type=float, default=4.0)
+    parser.add_argument("--no-jitter", action="store_true")
+    parser.add_argument("--draft", action="store_true")
+    args = parser.parse_args()
 
-    api_key = os.environ.get('GEMINI_API_KEY', '').strip().strip("'").strip('"')
-    if not api_key:
-        raise RuntimeError('GEMINI_API_KEY가 설정되지 않았습니다.')
-    response = requests.get(
-        'https://generativelanguage.googleapis.com/v1beta/models',
-        params={'key': api_key},
-        timeout=30,
-    )
-    response.raise_for_status()
-    print(f"[성공] 인증 점검 완료: {blog.get('name', blog_id)} / Gemini API")
+    blog_cfg = BLOGS_CONFIG[args.blog]
+    blog_id = os.environ.get("BLOG_ID") or blog_cfg["id"]
 
-if __name__ == '__main__':
-    blog_id = os.environ.get('BLOG_ID', '5571572496232571585')
+    schedule_iso = None
+    if args.schedule_hours > 0 and not args.draft:
+        schedule_iso, readable_time, jitter = calculate_natural_schedule_time(args.schedule_hours, not args.no_jitter)
+        print(f"⏰ 예약 발행 시간: {readable_time} (지터: {jitter:+d}분)")
 
-    if os.environ.get('VALIDATE_ONLY', '').lower() == 'true':
-        validate_configuration(blog_id)
-        sys.exit(0)
+    html_content = generate_post_content(blog_cfg, args.topic)
+    res = publish_to_blogger(blog_id, args.topic, html_content, blog_cfg["default_labels"], schedule_iso, args.draft)
 
-    print("Gemini AI를 통한 블로그 포스팅 내용 생성 중...")
-    post_data = generate_blog_post_with_gemini()
+    print(f"🎉 발행 완료! 글 ID: {res.get('id')} | 제목: {res.get('title')}")
 
-    publish_post(blog_id, post_data.get('title'), post_data.get('content'), post_data.get('labels'))
+if __name__ == "__main__":
+    main()
