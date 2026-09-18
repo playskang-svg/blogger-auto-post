@@ -510,8 +510,7 @@ Waiting for user input...</div>
       </div>
 
       <div class="quick-tools">
-        <button class="tool-btn" onclick="showChromeUI()">🖥️ 브라우저 창 띄우기 (수동 검수)</button>
-        <button class="tool-btn" onclick="hideChromeUI()">🙈 창 화면 밖 숨기기 (-5000px)</button>
+        <button class="tool-btn" onclick="openBloggerAdmin()">🖥️ Blogger 관리자 창 띄우기 (수동 검수)</button>
         <button class="tool-btn" onclick="checkStatus()">📊 블로그 상태 새로고침</button>
       </div>
     </div>
@@ -613,14 +612,12 @@ Waiting for user input...</div>
       }
     }
 
-    async function showChromeUI() {
-      appendLog("[UI] 화면에 Chrome 창을 띄웁니다...");
-      fetch("/api/show-ui");
-    }
-
-    async function hideChromeUI() {
-      appendLog("[UI] Chrome 창을 다시 화면 밖(-5000px)으로 격리합니다.");
-      fetch("/api/hide-ui");
+    function openBloggerAdmin() {
+      const b = blogsData[selectedBlog];
+      if (b && b.id) {
+        appendLog(`[UI] 새 탭에서 '${b.name}' Blogger 관리자 페이지를 엽니다.`);
+        window.open(`https://www.blogger.com/blog/posts/${b.id}`, '_blank');
+      }
     }
 
     async function checkStatus() {
@@ -644,12 +641,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             self.send_header("Content-type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(HTML_PAGE.encode("utf-8"))
-        elif url.path == "/api/show-ui":
-            os.system("python3 scripts/multi_blogger_manager.py --show-ui")
-            self._send_json({"success": True})
-        elif url.path == "/api/hide-ui":
-            os.system("python3 scripts/multi_blogger_manager.py --hide-ui")
-            self._send_json({"success": True})
+
         elif url.path == "/api/status":
             query = urllib.parse.parse_qs(url.query)
             blog_k = query.get("blog", ["atttrip"])[0]
