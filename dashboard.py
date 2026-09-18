@@ -467,10 +467,10 @@ HTML_PAGE = """<!DOCTYPE html>
         <p style="font-size: 11px; color: var(--text-muted); margin: -4px 0 8px;" id="lastPostHint">새 글은 해당 블로그의 마지막 글(발행/예약 포함) 시각으로부터 아래 시간만큼 지난 뒤 예약됩니다. 글이 없으면 지금 시각 기준으로 계산합니다.</p>
         <div class="presets">
           <button class="preset-btn" onclick="setHours(0)">⚡ 즉시 발행</button>
-          <button class="preset-btn" onclick="setHours(2)">마지막 글 +2시간</button>
-          <button class="preset-btn active" onclick="setHours(4)">마지막 글 +4시간</button>
-          <button class="preset-btn" onclick="setHours(6)">마지막 글 +6시간</button>
-          <button class="preset-btn" onclick="setHours(12)">마지막 글 +12시간</button>
+          <button class="preset-btn" onclick="setHours(2)">+2시간</button>
+          <button class="preset-btn active" onclick="setHours(4)">+4시간</button>
+          <button class="preset-btn" onclick="setHours(6)">+6시간</button>
+          <button class="preset-btn" onclick="setHours(12)">+12시간</button>
         </div>
         <input type="number" id="scheduleHours" value="4.0" step="0.5" min="0" style="margin-top: 10px; width: 120px;" onchange="updateCustomHours()">
 
