@@ -14,11 +14,23 @@ import urllib.parse
 import urllib.request
 import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import urllib.error
 
 PORT = 5050
 CONFIG_PATH = os.path.expanduser("~/Posting/Blogger/config/blogs.json")
 TOKEN_PATH = os.path.expanduser("~/Posting/Blogger/token.json")
+KST = timezone(timedelta(hours=9))
+
+# 대시보드에서 실제로 글을 발행할 블로그 매핑 (HTML의 blogsData와 동일하게 유지)
+# NOTE: suriwiki / vpn_adbles 는 원본 설정부터 같은 blog id(...571585)를 공유하고 있습니다.
+#       실제로 서로 다른 블로그라면 정확한 ID로 교체해 주세요. 그렇지 않으면 두 블로그 글이
+#       같은 Blogger 사이트로 발행됩니다.
+BLOGS = {
+    "atttrip": {"id": "3287113241520886880", "name": "아토트립", "labels": ["반려견 숙소", "반려견 여행", "애견동반 펜션", "아토트립"]},
+    "suriwiki": {"id": "5571572496232571585", "name": "수리위키", "labels": ["생활 수리", "생활 꿀팁", "비용 절약", "가전 점검"]},
+    "vpn_adbles": {"id": "5571572496232571585", "name": "VPN-Adbles", "labels": ["VPN 추천", "네트워크 보안", "할인 프로모션", "해외 스트리밍"]}
+}
 
 def load_blogs():
     if os.path.exists(CONFIG_PATH):
@@ -59,6 +71,95 @@ def get_access_token():
     except Exception as e:
         print(f"[TOKEN ERROR] {e}")
         return None
+
+def get_last_post_time_kst(blog_id, access_token):
+    """해당 블로그에 마지막으로 등록된 글(이미 발행됨 + 예약됨 포함)의 시각을 KST(naive)로 반환.
+    글이 하나도 없으면 None."""
+    if not access_token:
+        return None
+    latest = None
+    for status in ("live", "scheduled"):
+        try:
+            params = urllib.parse.urlencode({
+                "maxResults": 1,
+                "orderBy": "published",
+                "fetchBodies": "false",
+                "status": status
+            })
+            req = urllib.request.Request(
+                f"https://www.googleapis.com/blogger/v3/blogs/{blog_id}/posts?{params}",
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            items = data.get("items") or []
+            if items:
+                pub_str = items[0].get("published")
+                if pub_str:
+                    dt = datetime.fromisoformat(pub_str.replace("Z", "+00:00"))
+                    dt_kst = dt.astimezone(KST).replace(tzinfo=None)
+                    if latest is None or dt_kst > latest:
+                        latest = dt_kst
+        except Exception as e:
+            print(f"[LAST-POST ERROR][{status}] {e}")
+    return latest
+
+def generate_post_content(topic, extra_prompt):
+    """GEMINI_API_KEY가 있으면 Gemini로 본문 생성, 없으면 간단한 템플릿으로 대체."""
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    if gemini_key:
+        try:
+            prompt = (
+                "너는 전문 블로그 콘텐츠 에디터야. 아래 주제로 구글 블로그스팟에 게시할 SEO 최적화 글을 "
+                "HTML 본문 조각(<h2>,<h3>,<p>,<ul>,<li> 등)만 사용해서 작성해줘. <html>,<body> 태그와 "
+                "'블로그제목:' 같은 접두어는 절대 포함하지 마.\n\n"
+                f"[주제]: {topic}\n[추가 지침]: {extra_prompt or '없음'}"
+            )
+            body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
+            req = urllib.request.Request(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            lines = text.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            return "\n".join(lines).strip()
+        except Exception as e:
+            print(f"[GEMINI ERROR] {e}")
+    extra_html = f"<p>{extra_prompt}</p>" if extra_prompt else ""
+    return f"<h2>{topic}</h2>{extra_html}<p>본 포스팅은 Blogger Master Console 자동화로 등록되었습니다.</p>"
+
+def insert_blogger_post(blog_id, access_token, title, content_html, labels, published_iso, is_draft):
+    body = {
+        "kind": "blogger#post",
+        "blog": {"id": blog_id},
+        "title": title,
+        "content": content_html,
+    }
+    if labels:
+        body["labels"] = labels
+    if published_iso and not is_draft:
+        body["published"] = published_iso
+
+    query = "?isDraft=true" if is_draft else ""
+    req = urllib.request.Request(
+        f"https://www.googleapis.com/blogger/v3/blogs/{blog_id}/posts{query}",
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        },
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="ko">
@@ -362,13 +463,14 @@ HTML_PAGE = """<!DOCTYPE html>
 
       <div class="card-title">⏰ 3. 예약 발행 스케줄러</div>
       <div class="schedule-panel">
-        <label>기준 예약 지연 시간 (Hours)</label>
+        <label>마지막 글 기준 간격 시간 (Hours)</label>
+        <p style="font-size: 11px; color: var(--text-muted); margin: -4px 0 8px;" id="lastPostHint">새 글은 해당 블로그의 마지막 글(발행/예약 포함) 시각으로부터 아래 시간만큼 지난 뒤 예약됩니다. 글이 없으면 지금 시각 기준으로 계산합니다.</p>
         <div class="presets">
           <button class="preset-btn" onclick="setHours(0)">⚡ 즉시 발행</button>
-          <button class="preset-btn" onclick="setHours(2)">2시간 후</button>
-          <button class="preset-btn active" onclick="setHours(4)">4시간 후</button>
-          <button class="preset-btn" onclick="setHours(6)">6시간 후</button>
-          <button class="preset-btn" onclick="setHours(12)">12시간 후</button>
+          <button class="preset-btn" onclick="setHours(2)">마지막 글 +2시간</button>
+          <button class="preset-btn active" onclick="setHours(4)">마지막 글 +4시간</button>
+          <button class="preset-btn" onclick="setHours(6)">마지막 글 +6시간</button>
+          <button class="preset-btn" onclick="setHours(12)">마지막 글 +12시간</button>
         </div>
         <input type="number" id="scheduleHours" value="4.0" step="0.5" min="0" style="margin-top: 10px; width: 120px;" onchange="updateCustomHours()">
 
@@ -449,7 +551,11 @@ Waiting for user input...</div>
       document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
       event.target.classList.add("active");
       document.getElementById("scheduleHours").value = h;
-      appendLog(`[SCHEDULE] 예약 간격이 ${h}시간으로 설정되었습니다.`);
+      if (h === 0) {
+        appendLog(`[SCHEDULE] 즉시 발행으로 설정되었습니다.`);
+      } else {
+        appendLog(`[SCHEDULE] 마지막 글 기준 +${h}시간 후로 예약 간격이 설정되었습니다.`);
+      }
     }
 
     function updateCustomHours() {
@@ -478,7 +584,7 @@ Waiting for user input...</div>
       appendLog(`========================================`);
       appendLog(`[START] '${blogsData[selectedBlog].name}' 포스팅 작업 시작...`);
       appendLog(`  - 주제: ${topic}`);
-      appendLog(`  - 예약 설정: ${hours}시간 후 (지터: ${useJitter ? 'ON' : 'OFF'})`);
+      appendLog(`  - 예약 설정: 마지막 글 기준 +${hours}시간 후 (지터: ${useJitter ? 'ON' : 'OFF'})`);
       appendLog(`  - 모드: ${isDraft ? '초안 저장' : '예약 발행'}`);
 
       try {
@@ -558,25 +664,64 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         if url.path == "/api/publish":
             length = int(self.headers.get('content-length', 0))
             body = json.loads(self.rfile.read(length).decode('utf-8'))
-            
-            # Execute publish via blogger_poster.py
+
             blog_k = body.get("blog", "atttrip")
             topic = body.get("topic", "새 포스팅")
-            hours = body.get("schedule_hours", 4.0)
+            user_prompt = body.get("prompt", "")
+            hours = float(body.get("schedule_hours", 4.0) or 0)
             use_jitter = body.get("use_jitter", True)
             is_draft = body.get("is_draft", False)
 
-            now_kst = datetime.utcnow() + timedelta(hours=9)
-            jitter_m = random.randint(-20, 25) if use_jitter else 0
-            target_kst = (now_kst + timedelta(hours=hours, minutes=jitter_m)).replace(second=0, microsecond=0)
-            sched_str = target_kst.strftime("%Y년 %m월 %d일 %p %I시 %M분")
+            blog_info = BLOGS.get(blog_k)
+            if not blog_info:
+                self._send_json({"success": False, "error": f"알 수 없는 블로그: {blog_k}"})
+                return
+            blog_id = blog_info["id"]
 
-            # Call local python runner or API
-            self._send_json({
-                "success": True,
-                "post_id": f"7{random.randint(100000000000000000, 999999999999999999)}",
-                "schedule_time": sched_str
-            })
+            access_token = get_access_token()
+            if not access_token:
+                self._send_json({"success": False, "error": "Blogger 인증 토큰을 가져오지 못했습니다. token.json을 확인하세요."})
+                return
+
+            try:
+                now_kst = datetime.utcnow() + timedelta(hours=9)
+                published_iso = None
+                sched_str = "즉시 발행"
+
+                if not is_draft and hours > 0:
+                    last_post_kst = get_last_post_time_kst(blog_id, access_token)
+                    base_kst = last_post_kst if last_post_kst else now_kst
+                    jitter_m = random.randint(-20, 25) if use_jitter else 0
+                    target_kst = base_kst + timedelta(hours=hours, minutes=jitter_m)
+                    if target_kst <= now_kst:
+                        target_kst = now_kst + timedelta(minutes=max(jitter_m, 1))
+                    target_kst = target_kst.replace(second=0, microsecond=0)
+                    published_iso = target_kst.strftime("%Y-%m-%dT%H:%M:00+09:00")
+                    sched_str = target_kst.strftime("%Y년 %m월 %d일 %p %I시 %M분")
+                    if last_post_kst:
+                        sched_str += f" (마지막 글 {last_post_kst.strftime('%m/%d %H:%M')} 기준 +{hours}시간)"
+                    else:
+                        sched_str += " (첫 글이라 현재 시각 기준)"
+                elif is_draft:
+                    sched_str = "초안 저장됨"
+
+                content_html = generate_post_content(topic, user_prompt)
+                result = insert_blogger_post(
+                    blog_id, access_token, topic, content_html,
+                    blog_info.get("labels", []), published_iso, is_draft
+                )
+
+                self._send_json({
+                    "success": True,
+                    "post_id": result.get("id"),
+                    "post_url": result.get("url"),
+                    "schedule_time": sched_str
+                })
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode("utf-8", errors="ignore")
+                self._send_json({"success": False, "error": f"Blogger API 오류({e.code}): {err_body}"})
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)})
         else:
             self.send_response(404)
             self.end_headers()
