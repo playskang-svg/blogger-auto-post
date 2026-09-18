@@ -161,6 +161,26 @@ def insert_blogger_post(blog_id, access_token, title, content_html, labels, publ
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
+def get_blog_status(blog_id, access_token):
+    if not access_token: return {"live": 0, "scheduled": 0, "draft": 0}
+    try:
+        live = 0
+        req = urllib.request.Request(f"https://www.googleapis.com/blogger/v3/blogs/{blog_id}", headers={"Authorization": f"Bearer {access_token}"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            live = json.loads(resp.read().decode("utf-8")).get("posts", {}).get("totalItems", 0)
+
+        def count_posts(status):
+            c = 0
+            req = urllib.request.Request(f"https://www.googleapis.com/blogger/v3/blogs/{blog_id}/posts?status={status}&maxResults=500&fetchBodies=false", headers={"Authorization": f"Bearer {access_token}"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                c = len(json.loads(resp.read().decode("utf-8")).get("items", []))
+            return c
+
+        return {"live": live, "scheduled": count_posts("scheduled"), "draft": count_posts("draft")}
+    except Exception as e:
+        print(f"[STATUS ERROR] {e}")
+        return {"live": 0, "scheduled": 0, "draft": 0}
+
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -269,30 +289,9 @@ HTML_PAGE = """<!DOCTYPE html>
     }
 
     /* Blog Selector */
-    .blog-cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 12px;
+    .blog-select-container {
       margin-bottom: 24px;
     }
-    .blog-btn {
-      background: var(--bg-card);
-      border: 2px solid var(--border-color);
-      border-radius: 12px;
-      padding: 16px 12px;
-      text-align: left;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      color: var(--text-main);
-    }
-    .blog-btn:hover { border-color: rgba(255, 123, 84, 0.5); transform: translateY(-2px); }
-    .blog-btn.active {
-      border-color: var(--accent);
-      background: rgba(255, 123, 84, 0.1);
-      box-shadow: 0 4px 16px var(--accent-glow);
-    }
-    .blog-btn .b-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
-    .blog-btn .b-id { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
 
     /* Form Fields */
     .field-group { margin-bottom: 20px; }
@@ -447,8 +446,13 @@ HTML_PAGE = """<!DOCTYPE html>
     <!-- Left Column: Controls -->
     <div class="card">
       <div class="card-title">📌 1. 대상 블로그 선택 (Multi-Blog)</div>
-      <div class="blog-cards" id="blogCards">
-        <!-- Injected dynamically -->
+      <div class="blog-select-container">
+        <select id="blogSelect" onchange="selectBlog(this.value)" style="font-weight: 600; padding: 14px; font-size: 15px;">
+          <!-- Injected dynamically -->
+        </select>
+        <div id="blogStatusText" style="margin-top: 12px; font-size: 13px; color: var(--text-muted); background: rgba(255,255,255,0.03); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); text-align: center;">
+          선택된 블로그 상태를 불러오는 중...
+        </div>
       </div>
 
       <div class="card-title">✍️ 2. 포스팅 주제 및 AI 지침 주입</div>
@@ -526,24 +530,36 @@ Waiting for user input...</div>
     let selectedBlog = "atttrip";
 
     function renderBlogs() {
-      const container = document.getElementById("blogCards");
-      container.innerHTML = "";
+      const select = document.getElementById("blogSelect");
+      select.innerHTML = "";
       for (let k in blogsData) {
         const b = blogsData[k];
-        const active = k === selectedBlog ? "active" : "";
-        container.innerHTML += `
-          <div class="blog-btn ${active}" onclick="selectBlog('${k}')">
-            <div class="b-name">${b.name}</div>
-            <div class="b-id">ID: ...${b.id.slice(-6)}</div>
-          </div>
-        `;
+        const selected = k === selectedBlog ? "selected" : "";
+        select.innerHTML += `<option value="${k}" ${selected}>${b.name} (ID: ...${b.id.slice(-6)})</option>`;
       }
+      updateBlogStatusText();
     }
 
     function selectBlog(k) {
       selectedBlog = k;
-      renderBlogs();
       appendLog(`[SELECT] 대상 블로그가 '${blogsData[k].name}'(으)로 변경되었습니다.`);
+      updateBlogStatusText();
+    }
+
+    async function updateBlogStatusText() {
+      const statusDiv = document.getElementById("blogStatusText");
+      statusDiv.innerHTML = "선택된 블로그 상태를 불러오는 중...";
+      try {
+        const resp = await fetch(`/api/status?blog=${selectedBlog}`);
+        const data = await resp.json();
+        if(data.success) {
+           statusDiv.innerHTML = `선택된 블로그의 총 발행 글 수: <strong style="color:var(--text-main)">${data.counts.live}</strong>개 &nbsp;&nbsp;|&nbsp;&nbsp; 예약대기: <strong style="color:var(--warning)">${data.counts.scheduled}</strong>개 &nbsp;&nbsp;|&nbsp;&nbsp; 임시저장: <strong style="color:var(--text-main)">${data.counts.draft}</strong>개`;
+        } else {
+           statusDiv.innerHTML = "상태를 불러올 수 없습니다.";
+        }
+      } catch(e) {
+         statusDiv.innerHTML = "상태 불러오기 실패";
+      }
     }
 
     function setHours(h) {
@@ -622,9 +638,11 @@ Waiting for user input...</div>
 
     async function checkStatus() {
       appendLog(`[STATUS] '${blogsData[selectedBlog].name}' 상태를 조회 중...`);
-      const resp = await fetch(`/api/status?blog=${selectedBlog}`);
-      const data = await resp.json();
-      appendLog(`  - 상태 요약: ${JSON.stringify(data.counts || data)}`);
+      await updateBlogStatusText();
+      const statusDiv = document.getElementById("blogStatusText");
+      if(statusDiv.innerText.includes("발행")) {
+          appendLog(`  - 상태 요약: ${statusDiv.innerText.replace(/&nbsp;/g, "").replace(/\|/g, "/")}`);
+      }
     }
 
     renderBlogs();
@@ -645,8 +663,13 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         elif url.path == "/api/status":
             query = urllib.parse.parse_qs(url.query)
             blog_k = query.get("blog", ["atttrip"])[0]
-            # status check
-            self._send_json({"success": True, "counts": "게시됨: 40개, 예약됨: 1개, 휴지통: 1개"})
+            blog_info = BLOGS.get(blog_k)
+            if blog_info:
+                access_token = get_access_token()
+                counts = get_blog_status(blog_info["id"], access_token)
+                self._send_json({"success": True, "counts": counts})
+            else:
+                self._send_json({"success": False, "error": "Invalid blog"})
         else:
             self.send_response(404)
             self.end_headers()
