@@ -69,13 +69,37 @@ def calculate_natural_schedule_time(base_hours=4.0, apply_jitter=True):
     readable_str = target_kst.strftime("%Y년 %m월 %d일 %p %I시 %M분")
     return rfc3339_str, readable_str, jitter_minutes
 
-def generate_post_content(blog_cfg, user_topic):
+def get_recent_posts(blog_id, creds, max_results=20):
+    """내부링크용 최근 게시물 제목+URL 목록 조회"""
+    try:
+        service = build("blogger", "v3", credentials=creds)
+        resp = service.posts().list(blogId=blog_id, maxResults=max_results, fetchBodies=False, status="live").execute()
+        items = resp.get("items", [])
+        return [{"title": item["title"], "url": item["url"]} for item in items]
+    except Exception as e:
+        print(f"[WARN] 최근 글 목록 조회 실패(내부링크 없이 진행): {e}", file=sys.stderr)
+        return []
+
+def generate_post_content(blog_cfg, user_topic, related_posts=None):
     gemini_key = os.environ.get("GEMINI_API_KEY")
     if not gemini_key:
         return f"<h2>{user_topic} 핵심 총정리</h2><p>본 포스팅은 {blog_cfg['name']} 공식 가이드입니다.</p>"
 
     genai.configure(api_key=gemini_key)
     model = genai.GenerativeModel("gemini-3.6-flash")
+
+    related_links_block = ""
+    if related_posts:
+        links_list = "\n".join([f'    - "{p["title"]}" → {p["url"]}' for p in related_posts[:20]])
+        related_links_block = f"""
+    [내부링크 규칙 - 반드시 준수]:
+    아래는 이 블로그에 실제 존재하는 기존 글 목록입니다. 이 중 지금 쓰는 글의 주제와 관련성이 높은 2~3개를 골라, 본문 문장 안에 자연스럽게
+    <a href="URL" style="color:#0f9d7a;font-weight:600;text-decoration:underline;">자연스러운 앵커텍스트</a> 형태로 삽입하세요.
+    절대 이 목록에 없는 URL을 직접 만들어내지 마세요. 관련성이 낮으면 억지로 넣지 말고 생략해도 됩니다.
+
+    [기존 글 목록]:
+{links_list}
+"""
 
     prompt = f"""
     당신은 블로그 글 작성 최고 전문가입니다.
@@ -105,6 +129,7 @@ def generate_post_content(blog_cfg, user_topic):
     - 사진(img): <img style="width:85%;max-width:85%;height:auto;display:block;margin:24px auto;border-radius:8px;" src="..." alt="..."/>
     - 핵심 포인트/팁 강조 박스 (섹션당 1개 정도 활용): <div style="background:#f8f8f9;border-left:4px solid #0f9d7a;border-radius:8px;padding:16px 20px;margin:24px 0;font-family:'Noto Sans KR','Malgun Gothic',sans-serif;font-size:16px;line-height:1.7;color:#2b2d33;"><strong style="color:#0f9d7a;">💡 TIP</strong><br/>...내용...</div>
     - 요약/체크리스트 박스 (글 마지막에 1개): <div style="background:#fefaf3;border:1px solid #f0e4d0;border-radius:8px;padding:20px 24px;margin:28px 0;font-family:'Noto Sans KR','Malgun Gothic',sans-serif;"><strong style="color:#2b2d33;font-size:17px;">✅ 핵심 체크리스트</strong><ul style="margin:12px 0 0;padding-left:20px;color:#3d3d42;line-height:1.8;">...</ul></div>
+    {related_links_block}
     """
     resp = model.generate_content(prompt)
     content = resp.text.strip()
@@ -148,7 +173,11 @@ def main():
         schedule_iso, readable_time, jitter = calculate_natural_schedule_time(args.schedule_hours, not args.no_jitter)
         print(f"⏰ 예약 발행 시간: {readable_time} (지터: {jitter:+d}분)")
 
-    html_content = generate_post_content(blog_cfg, args.topic)
+    creds_for_links = get_credentials()
+    related_posts = get_recent_posts(blog_id, creds_for_links, max_results=20)
+    print(f"🔗 내부링크용 기존 글 {len(related_posts)}개 조회됨")
+
+    html_content = generate_post_content(blog_cfg, args.topic, related_posts)
     res = publish_to_blogger(blog_id, args.topic, html_content, blog_cfg["default_labels"], schedule_iso, args.draft)
 
     print(f"🎉 발행 완료! 글 ID: {res.get('id')} | 제목: {res.get('title')}")
