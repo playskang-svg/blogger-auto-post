@@ -111,13 +111,20 @@ def generate_post_content(topic, extra_prompt):
         try:
             prompt = (
                 "너는 전문 블로그 콘텐츠 에디터야. 아래 주제로 구글 블로그스팟에 게시할 SEO 최적화 글을 "
-                "HTML 본문 조각(<h2>,<h3>,<p>,<ul>,<li> 등)만 사용해서 작성해줘. <html>,<body> 태그와 "
-                "'블로그제목:' 같은 접두어는 절대 포함하지 마.\n\n"
+                "HTML 본문 조각(<h2>,<h3>,<p>,<ul>,<li>,<div> 등)만 사용해서 작성해줘. <html>,<body> 태그와 "
+                "'블로그제목:' 같은 접두어는 절대 포함하지 마. 상투적이고 장식적인 문구 대신 구체적인 수치·기준·조건 중심으로 간결하게 쓸 것.\n\n"
+                "[디자인 스타일 규칙 - 아래 인라인 style을 모든 해당 태그에 그대로 적용]: "
+                "문단(p): <p style=\"font-family:'Noto Sans KR','Malgun Gothic',sans-serif;font-size:18px;line-height:1.85;color:#3d3d42;margin:0 0 20px;\">...</p> / "
+                "h2: <h2 style=\"font-family:'Noto Sans KR','Malgun Gothic',sans-serif;font-size:24px;font-weight:700;color:#2b2d33;margin:36px 0 16px;\">...</h2> / "
+                "h3: <h3 style=\"font-family:'Noto Sans KR','Malgun Gothic',sans-serif;font-size:20px;font-weight:700;color:#2b2d33;margin:28px 0 12px;\">...</h3> / "
+                "ul: <ul style=\"font-family:'Noto Sans KR','Malgun Gothic',sans-serif;font-size:18px;line-height:1.85;color:#3d3d42;padding-left:20px;margin:0 0 20px;\">...</ul> / "
+                "strong: <strong style=\"color:#16181d;\">...</strong> / "
+                "팁박스(섹션당 1개): <div style=\"background:#f8f8f9;border-left:4px solid #0f9d7a;border-radius:8px;padding:16px 20px;margin:24px 0;font-family:'Noto Sans KR',sans-serif;font-size:16px;line-height:1.7;color:#2b2d33;\"><strong style=\"color:#0f9d7a;\">💡 TIP</strong><br/>...</div>\n\n"
                 f"[주제]: {topic}\n[추가 지침]: {extra_prompt or '없음'}"
             )
             body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
             req = urllib.request.Request(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={gemini_key}",
                 data=body,
                 headers={"Content-Type": "application/json"},
                 method="POST"

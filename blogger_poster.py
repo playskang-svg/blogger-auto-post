@@ -86,11 +86,25 @@ def generate_post_content(blog_cfg, user_topic):
     [요청 주제]: {user_topic}
 
     [HTML 필수 규칙]:
-    1. <html>, <body> 없이 <h2>, <h3>, <p>, <ul>, <li>, <strong> 본문 조각만 출력할 것.
+    1. <html>, <body> 없이 <h2>, <h3>, <p>, <ul>, <li>, <strong>, <div> 본문 조각만 출력할 것.
     2. 수동 목차 박스는 절대 넣지 말 것 (스킨이 자동 목차 생성).
     3. 최소 4개 이상의 <h2> 섹션으로 심층 비교 및 핵심 정보 제공.
     4. 본문 중간에 고화질 관련 Unsplash 사진 태그 1~2개 포함 (alt 태그에 검색 키워드 완벽 반영).
     5. 마지막에 독자를 위한 요약 체크리스트(<ul>) 및 격려 맺음말 포함.
+
+    [문체 규칙 - 키워드/수치/조건 중심으로 간결하게]:
+    - "~라고 할 수 있습니다", "정말 좋은" 같은 상투적이고 장식적인 문구는 쓰지 말고, 구체적인 수치·기준·조건·절차 중심으로 간결하게 쓸 것.
+    - 모든 문장은 실질적 정보를 담을 것. 장식적인 미사여구나 반복적인 문장 구조는 피할 것.
+
+    [디자인 스타일 규칙 - 아래 인라인 style을 모든 해당 태그에 그대로 적용할 것. 절대 생략하거나 다른 폰트/색상으로 바꾸지 말 것]:
+    - 문단(p): <p style="font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif;font-size:18px;line-height:1.85;color:#3d3d42;margin:0 0 20px;">...</p>
+    - 큰 소제목(h2): <h2 style="font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif;font-size:24px;font-weight:700;color:#2b2d33;margin:36px 0 16px;">...</h2>
+    - 작은 소제목(h3): <h3 style="font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif;font-size:20px;font-weight:700;color:#2b2d33;margin:28px 0 12px;">...</h3>
+    - 목록(ul): <ul style="font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif;font-size:18px;line-height:1.85;color:#3d3d42;padding-left:20px;margin:0 0 20px;">...</ul> (li는 스타일 없이 그대로)
+    - 강조(strong): <strong style="color:#16181d;">...</strong>
+    - 사진(img): <img style="width:85%;max-width:85%;height:auto;display:block;margin:24px auto;border-radius:8px;" src="..." alt="..."/>
+    - 핵심 포인트/팁 강조 박스 (섹션당 1개 정도 활용): <div style="background:#f8f8f9;border-left:4px solid #0f9d7a;border-radius:8px;padding:16px 20px;margin:24px 0;font-family:'Noto Sans KR','Malgun Gothic',sans-serif;font-size:16px;line-height:1.7;color:#2b2d33;"><strong style="color:#0f9d7a;">💡 TIP</strong><br/>...내용...</div>
+    - 요약/체크리스트 박스 (글 마지막에 1개): <div style="background:#fefaf3;border:1px solid #f0e4d0;border-radius:8px;padding:20px 24px;margin:28px 0;font-family:'Noto Sans KR','Malgun Gothic',sans-serif;"><strong style="color:#2b2d33;font-size:17px;">✅ 핵심 체크리스트</strong><ul style="margin:12px 0 0;padding-left:20px;color:#3d3d42;line-height:1.8;">...</ul></div>
     """
     resp = model.generate_content(prompt)
     content = resp.text.strip()

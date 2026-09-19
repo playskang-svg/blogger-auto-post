@@ -73,7 +73,7 @@ def generate_blog_post(topic, keywords, tone, structure, ad_code=""):
         return None, "GEMINI_API_KEY가 설정되지 않았습니다."
 
     clean_key = GEMINI_API_KEY.strip().strip("'").strip('"')
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={clean_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={clean_key}"
     headers = {"Content-Type": "application/json"}
     
     prompt = f"""너는 전문 블로그 콘텐츠 에디터야. 구글 블로그스팟에 포스팅할 높은 품질의 SEO 최적화 글을 작성해줘.
@@ -83,7 +83,17 @@ def generate_blog_post(topic, keywords, tone, structure, ad_code=""):
 - 키워드: {keywords}
 - 어조: {tone}
 - 구조: {structure}
-- 출력 포맷: HTML 형식 (<h2>, <h3>, <p>, <ul>, <li> 등 적절히 활용)
+- 출력 포맷: HTML 형식 (<h2>, <h3>, <p>, <ul>, <li>, <div> 등 적절히 활용)
+- 문체: 상투적이고 장식적인 문구 대신 구체적인 수치·기준·조건 중심으로 간결하게 작성
+
+[디자인 스타일 규칙 - 아래 인라인 style을 모든 해당 태그에 그대로 적용할 것]:
+- 문단(p): <p style="font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif;font-size:18px;line-height:1.85;color:#3d3d42;margin:0 0 20px;">...</p>
+- 큰 소제목(h2): <h2 style="font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif;font-size:24px;font-weight:700;color:#2b2d33;margin:36px 0 16px;">...</h2>
+- 작은 소제목(h3): <h3 style="font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif;font-size:20px;font-weight:700;color:#2b2d33;margin:28px 0 12px;">...</h3>
+- 목록(ul): <ul style="font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif;font-size:18px;line-height:1.85;color:#3d3d42;padding-left:20px;margin:0 0 20px;">...</ul>
+- 강조(strong): <strong style="color:#16181d;">...</strong>
+- 핵심 포인트/팁 박스: <div style="background:#f8f8f9;border-left:4px solid #0f9d7a;border-radius:8px;padding:16px 20px;margin:24px 0;font-family:'Noto Sans KR','Malgun Gothic',sans-serif;font-size:16px;line-height:1.7;color:#2b2d33;"><strong style="color:#0f9d7a;">💡 TIP</strong><br/>...</div>
+- 요약/체크리스트 박스: <div style="background:#fefaf3;border:1px solid #f0e4d0;border-radius:8px;padding:20px 24px;margin:28px 0;font-family:'Noto Sans KR','Malgun Gothic',sans-serif;"><strong style="color:#2b2d33;font-size:17px;">✅ 핵심 체크리스트</strong><ul style="margin:12px 0 0;padding-left:20px;color:#3d3d42;line-height:1.8;">...</ul></div>
 - 주의사항 1: 결과물에 '블로그제목:' 이라는 텍스트는 절대 포함하지 말 것. 오직 본문만 작성할 것.
 - 주의사항 2: 전달하는 광고 코드가 있을 경우, 구조가 절대 흐트러지지 않게 원본 그대로 본문에 삽입할 것.
 
