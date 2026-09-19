@@ -75,7 +75,7 @@ def generate_post_content(blog_cfg, user_topic):
         return f"<h2>{user_topic} 핵심 총정리</h2><p>본 포스팅은 {blog_cfg['name']} 공식 가이드입니다.</p>"
 
     genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-3.6-flash")
 
     prompt = f"""
     당신은 블로그 글 작성 최고 전문가입니다.
